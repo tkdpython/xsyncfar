@@ -14,6 +14,7 @@ from xsyncfar.sync import (
     detect_direction,
     find_config,
     get_allowed_extensions,
+    get_ignore_patterns,
     load_config,
     run_sync,
 )
@@ -493,3 +494,93 @@ class TestCollectOtherFiles(unittest.TestCase):
             _write(root / "b.yml", "")
             other = collect_other_files(root, {".yml"})
             self.assertEqual(other, [])
+
+
+# ---------------------------------------------------------------------------
+# get_ignore_patterns
+# ---------------------------------------------------------------------------
+
+
+class TestGetIgnorePatterns(unittest.TestCase):
+    def test_returns_defaults_when_no_ignore_key(self):
+        patterns = get_ignore_patterns({})
+        self.assertIn(".git", patterns)
+
+    def test_merges_config_patterns_with_defaults(self):
+        patterns = get_ignore_patterns({"ignore": ["*.pyc", "__pycache__"]})
+        self.assertIn(".git", patterns)
+        self.assertIn("*.pyc", patterns)
+        self.assertIn("__pycache__", patterns)
+
+    def test_empty_ignore_list_returns_only_defaults(self):
+        defaults = get_ignore_patterns({})
+        patterns = get_ignore_patterns({"ignore": []})
+        self.assertEqual(len(patterns), len(defaults))
+
+
+# ---------------------------------------------------------------------------
+# ignore patterns applied during collection
+# ---------------------------------------------------------------------------
+
+
+class TestIgnorePatterns(unittest.TestCase):
+    def test_git_directory_ignored_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / ".git" / "HEAD", "ref: refs/heads/main\n")
+            _write(root / ".git" / "config", "[core]\n")
+            _write(root / "values.yml", "key: val\n")
+            # Use default patterns (no explicit ignore_patterns arg)
+            files = collect_source_files(root, {".yml"})
+            names = {p.name for p in files}
+            self.assertIn("values.yml", names)
+            self.assertNotIn("HEAD", names)
+            self.assertNotIn("config", names)
+
+    def test_custom_pattern_excludes_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "dist" / "output.yml", "")
+            _write(root / "src" / "main.yml", "")
+            files = collect_source_files(root, {".yml"}, ignore_patterns=[".git", "dist"])
+            paths = {str(p.relative_to(root)) for p in files}
+            self.assertTrue(any("main.yml" in p for p in paths))
+            self.assertFalse(any("output.yml" in p for p in paths))
+
+    def test_wildcard_pattern_excludes_matching_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "keep.yml", "")
+            _write(root / "skip.yml", "")
+            files = collect_source_files(root, {".yml"}, ignore_patterns=["skip.*"])
+            names = {p.name for p in files}
+            self.assertIn("keep.yml", names)
+            self.assertNotIn("skip.yml", names)
+
+    def test_ignored_directory_not_descended_into(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "node_modules" / "lib" / "index.js", "")
+            _write(root / "app.yml", "")
+            files = collect_source_files(root, {".yml", ".js"}, ignore_patterns=["node_modules"])
+            names = {p.name for p in files}
+            self.assertNotIn("index.js", names)
+
+    def test_run_sync_respects_ignore_patterns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "values.yml", "cluster: myapp\n")
+            _write(lab / ".git" / "config", "gitdata\n")
+            syncmap = {
+                "prefix": "",
+                "replacements": [{"lab": "myapp", "prod": "targetapp"}],
+                "mappings": [{"lab": str(lab), "prod": str(prod)}],
+            }
+            run_sync(lab, prod, "lab_to_prod", syncmap)
+            self.assertTrue((prod / "values.yml").exists())
+            self.assertFalse((prod / ".git" / "config").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

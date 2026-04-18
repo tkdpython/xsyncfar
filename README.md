@@ -57,6 +57,15 @@ syncmap:
   # Useful for images, binaries, shell scripts, etc.
   # copy_other_files: true
 
+  # Optional: glob patterns for files/directories to exclude from sync entirely.
+  # Matched against both the item name and its path relative to the source root.
+  # .git is always ignored by default.
+  # ignore:
+  #   - "*.pyc"
+  #   - "__pycache__"
+  #   - ".terraform"
+  #   - "**/node_modules"
+
   # Literal find-and-replace rules applied to file content (case-insensitive)
   replacements:
     - lab: "mylab"       # string to find in source
@@ -133,6 +142,22 @@ Sync complete — 3 file(s) written:
 Override by adding an `extensions` list to your `.xsyncfar.yml`.
 
 To also copy files with **other** extensions unchanged (binary copy, no replacements — useful for images, scripts, binaries), set `copy_other_files: true` in your syncmap.
+
+### Ignoring files and directories
+
+Add an `ignore` list to your syncmap to exclude files or directories using glob patterns:
+
+```yaml
+syncmap:
+  ignore:
+    - "*.pyc"
+    - "__pycache__"
+    - ".terraform"
+    - "**/node_modules"
+    - "dist"
+```
+
+Patterns are matched against both the **item name** (e.g. `*.pyc` matches any `.pyc` file) and the **relative path from the source root** (e.g. `build/**` excludes everything under `build/`). The `.git` directory is always ignored by default.
 
 ---
 

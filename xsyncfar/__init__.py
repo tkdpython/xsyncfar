@@ -7,6 +7,7 @@ from .sync import (
     detect_direction,
     find_config,
     get_allowed_extensions,
+    get_ignore_patterns,
     load_config,
     run_sync,
 )
@@ -19,5 +20,6 @@ __all__ = [
     "collect_source_files",
     "collect_other_files",
     "get_allowed_extensions",
+    "get_ignore_patterns",
     "run_sync",
 ]

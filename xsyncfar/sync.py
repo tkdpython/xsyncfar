@@ -1,5 +1,6 @@
 ﻿"""Core sync logic for xsyncfar."""
 
+import fnmatch
 import os
 import re
 import shutil
@@ -171,6 +172,33 @@ def apply_replacements(content, replacements, direction):
 # File selection
 # ---------------------------------------------------------------------------
 
+DEFAULT_IGNORE_PATTERNS = [".git", ".git/**", "**/.git", "**/.git/**"]
+
+
+def get_ignore_patterns(syncmap):
+    """Return the combined list of ignore patterns (defaults + config)."""
+    config_patterns = syncmap.get("ignore", [])
+    return DEFAULT_IGNORE_PATTERNS + list(config_patterns)
+
+
+def _is_ignored(path, source_path, patterns):
+    """Return True if path matches any ignore pattern.
+
+    Patterns are matched against:
+    - the filename/directory name alone  (e.g. ``*.pyc``)
+    - the path relative to source_path   (e.g. ``build/**``)
+    Both comparisons use forward slashes for cross-platform consistency.
+    """
+    rel = path.relative_to(source_path)
+    rel_str = rel.as_posix()  # always forward slashes
+    name = path.name
+    for pattern in patterns:
+        if fnmatch.fnmatch(name, pattern):
+            return True
+        if fnmatch.fnmatch(rel_str, pattern):
+            return True
+    return False
+
 
 def get_allowed_extensions(syncmap):
     """Return the set of allowed extensions from config, or the defaults."""
@@ -180,30 +208,39 @@ def get_allowed_extensions(syncmap):
     return DEFAULT_EXTENSIONS
 
 
-def collect_source_files(source_path, allowed_extensions):
+def collect_source_files(source_path, allowed_extensions, ignore_patterns=None):
     """Recursively collect all eligible files under source_path.
 
     Returns a sorted list of absolute Path objects.
     """
+    if ignore_patterns is None:
+        ignore_patterns = []
     files = []
-    for root, _dirs, filenames in os.walk(str(source_path)):
+    for root, dirs, filenames in os.walk(str(source_path)):
+        root_path = Path(root)
+        # Prune ignored directories in-place so os.walk won't descend into them
+        dirs[:] = [d for d in dirs if not _is_ignored(root_path / d, source_path, ignore_patterns)]
         for filename in filenames:
-            fp = Path(root) / filename
-            if fp.suffix.lower() in allowed_extensions:
+            fp = root_path / filename
+            if fp.suffix.lower() in allowed_extensions and not _is_ignored(fp, source_path, ignore_patterns):
                 files.append(fp)
     return sorted(files)
 
 
-def collect_other_files(source_path, allowed_extensions):
+def collect_other_files(source_path, allowed_extensions, ignore_patterns=None):
     """Recursively collect all files whose extension is NOT in allowed_extensions.
 
     Returns a sorted list of absolute Path objects.
     """
+    if ignore_patterns is None:
+        ignore_patterns = []
     files = []
-    for root, _dirs, filenames in os.walk(str(source_path)):
+    for root, dirs, filenames in os.walk(str(source_path)):
+        root_path = Path(root)
+        dirs[:] = [d for d in dirs if not _is_ignored(root_path / d, source_path, ignore_patterns)]
         for filename in filenames:
-            fp = Path(root) / filename
-            if fp.suffix.lower() not in allowed_extensions:
+            fp = root_path / filename
+            if fp.suffix.lower() not in allowed_extensions and not _is_ignored(fp, source_path, ignore_patterns):
                 files.append(fp)
     return sorted(files)
 
@@ -258,8 +295,9 @@ def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
     """
     replacements = syncmap.get("replacements", [])
     allowed_extensions = get_allowed_extensions(syncmap)
+    ignore_patterns = get_ignore_patterns(syncmap)
     copy_other = syncmap.get("copy_other_files", False)
-    source_files = collect_source_files(source_path, allowed_extensions)
+    source_files = collect_source_files(source_path, allowed_extensions, ignore_patterns)
     changed_files = []
 
     for src_file in source_files:
@@ -293,7 +331,7 @@ def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
         changed_files.append(str(rel))
 
     if copy_other:
-        other_files = collect_other_files(source_path, allowed_extensions)
+        other_files = collect_other_files(source_path, allowed_extensions, ignore_patterns)
         for src_file in other_files:
             rel = src_file.relative_to(source_path)
             dest_file = dest_path / rel

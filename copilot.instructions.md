@@ -30,6 +30,7 @@ When working on this project, please follow these guidelines/rules
 - If `extensions` is set in `.xsyncfar.yml`, this list replaces the default entirely.
 - If `copy_other_files: true` is set in the syncmap, files whose extension is **not** in the allowed list are copied as-is (binary copy via `shutil.copy2`, no find/replace applied). This allows binaries, images, scripts and other non-text files to be included in the sync.
 - If `copy_other_files` is absent or `false`, non-matching files are silently skipped.
+- The `ignore` key (optional list of glob strings) excludes files and directories from sync entirely. Patterns are matched against both the item name and the path relative to the source root using `fnmatch`. `.git` is always ignored by default (built into `DEFAULT_IGNORE_PATTERNS`). Ignored directories are pruned before recursion so their contents are never visited.
 - All subdirectories under the matched source path are processed recursively.
 
 ## Sync Behaviour
