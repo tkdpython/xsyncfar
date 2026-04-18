@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xsyncfar"
+version = "0.1.0"
+description = "xsyncfar"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+authors = [{ name = "xsyncfar contributors" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+xsyncfar = "xsyncfar.cli:main"
+
+[tool.setuptools]
+packages = ["xsyncfar"]
