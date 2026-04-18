@@ -566,6 +566,21 @@ class TestIgnorePatterns(unittest.TestCase):
             names = {p.name for p in files}
             self.assertNotIn("index.js", names)
 
+    def test_double_star_pattern_matches_at_root_level(self):
+        """**/tenants/core should exclude tenants/core even at the source root."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "tenants" / "core" / "vars.yaml", "")
+            _write(root / "tenants" / "_template" / "ns.yaml", "")
+            _write(root / "values.yml", "")
+            files = collect_source_files(
+                root, {".yaml", ".yml"}, ignore_patterns=["**/tenants/core"]
+            )
+            rel_paths = {str(p.relative_to(root)) for p in files}
+            self.assertTrue(any("values.yml" in p for p in rel_paths))
+            self.assertTrue(any("_template" in p for p in rel_paths))
+            self.assertFalse(any("core" in p for p in rel_paths))
+
     def test_run_sync_respects_ignore_patterns(self):
         with tempfile.TemporaryDirectory() as tmp:
             lab = Path(tmp) / "lab"

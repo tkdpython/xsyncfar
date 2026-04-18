@@ -197,6 +197,14 @@ def _is_ignored(path, source_path, patterns):
             return True
         if fnmatch.fnmatch(rel_str, pattern):
             return True
+        # Strip leading **/ repetitions and retry — fnmatch cannot match
+        # "tenants/core" against "**/tenants/core" because ** requires a
+        # preceding "/" that isn't there at the root of the relative path.
+        stripped = pattern
+        while stripped.startswith("**/"):
+            stripped = stripped[3:]
+        if stripped != pattern and fnmatch.fnmatch(rel_str, stripped):
+            return True
     return False
 
 
