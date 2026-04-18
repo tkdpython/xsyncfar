@@ -28,7 +28,8 @@ When working on this project, please follow these guidelines/rules
 
 - By default, only files with the following extensions are synced: `.py`, `.yml`, `.yaml`, `.json`, `.txt`, `.md`
 - If `extensions` is set in `.xsyncfar.yml`, this list replaces the default entirely.
-- Binary files and files with non-matching extensions are silently skipped (not copied).
+- If `copy_other_files: true` is set in the syncmap, files whose extension is **not** in the allowed list are copied as-is (binary copy via `shutil.copy2`, no find/replace applied). This allows binaries, images, scripts and other non-text files to be included in the sync.
+- If `copy_other_files` is absent or `false`, non-matching files are silently skipped.
 - All subdirectories under the matched source path are processed recursively.
 
 ## Sync Behaviour

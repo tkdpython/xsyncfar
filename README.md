@@ -53,6 +53,10 @@ syncmap:
   #   - .tf
   #   - .py
 
+  # Optional: copy files with non-matching extensions as-is (binary copy, no replacements)
+  # Useful for images, binaries, shell scripts, etc.
+  # copy_other_files: true
+
   # Literal find-and-replace rules applied to file content (case-insensitive)
   replacements:
     - lab: "mylab"       # string to find in source
@@ -127,6 +131,8 @@ Sync complete — 3 file(s) written:
 `.py`, `.yml`, `.yaml`, `.json`, `.txt`, `.md`
 
 Override by adding an `extensions` list to your `.xsyncfar.yml`.
+
+To also copy files with **other** extensions unchanged (binary copy, no replacements — useful for images, scripts, binaries), set `copy_other_files: true` in your syncmap.
 
 ---
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from xsyncfar.sync import (
     apply_replacements,
     build_absolute_path,
+    collect_other_files,
     collect_source_files,
     dest_needs_update,
     detect_direction,
@@ -412,6 +413,83 @@ class TestRunSync(unittest.TestCase):
             self.assertFalse((prod / "file.yml").exists())
             self.assertEqual(len(changed), 1)
 
+    def test_copy_other_files_copies_non_matching_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "config.yml", "key: myapp\n")
+            # Binary-ish file whose extension is not in the default set
+            (lab / "logo.png").parent.mkdir(parents=True, exist_ok=True)
+            (lab / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+            syncmap = self._make_syncmap(lab, prod)
+            syncmap["copy_other_files"] = True
+            changed = run_sync(lab, prod, "lab_to_prod", syncmap)
+            self.assertIn("logo.png", [c.replace("\\", "/") for c in changed])
+            self.assertEqual((prod / "logo.png").read_bytes(), b"\x89PNG\r\n\x1a\n")
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_copy_other_files_false_skips_non_matching(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "config.yml", "key: myapp\n")
+            (lab / "logo.png").parent.mkdir(parents=True, exist_ok=True)
+            (lab / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+            syncmap = self._make_syncmap(lab, prod)
+            # copy_other_files not set (defaults to False)
+            run_sync(lab, prod, "lab_to_prod", syncmap)
+            self.assertFalse((prod / "logo.png").exists())
+
+    def test_copy_other_files_skips_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            data = b"\x89PNG\r\n\x1a\n"
+            (lab / "logo.png").parent.mkdir(parents=True, exist_ok=True)
+            (lab / "logo.png").write_bytes(data)
+            # Pre-populate destination with identical content
+            (prod / "logo.png").parent.mkdir(parents=True, exist_ok=True)
+            (prod / "logo.png").write_bytes(data)
+            syncmap = self._make_syncmap(lab, prod)
+            syncmap["copy_other_files"] = True
+            changed = run_sync(lab, prod, "lab_to_prod", syncmap)
+            # No text files changed, binary file unchanged — nothing reported
+            self.assertEqual(changed, [])
+
+    def test_copy_other_files_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            (lab / "logo.png").parent.mkdir(parents=True, exist_ok=True)
+            (lab / "logo.png").write_bytes(b"\x89PNG")
+            syncmap = self._make_syncmap(lab, prod)
+            syncmap["copy_other_files"] = True
+            changed = run_sync(lab, prod, "lab_to_prod", syncmap, dry_run=True)
+            self.assertEqual(len(changed), 1)
+            self.assertFalse((prod / "logo.png").exists())
+
+
+# ---------------------------------------------------------------------------
+# collect_other_files
+# ---------------------------------------------------------------------------
+
+
+class TestCollectOtherFiles(unittest.TestCase):
+    def test_returns_files_not_in_extension_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "config.yml", "")
+            (root / "logo.png").write_bytes(b"")
+            (root / "script.sh").write_bytes(b"")
+            other = collect_other_files(root, {".yml"})
+            names = {p.name for p in other}
+            self.assertIn("logo.png", names)
+            self.assertIn("script.sh", names)
+            self.assertNotIn("config.yml", names)
+
+    def test_returns_empty_when_all_files_match_extensions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "a.yml", "")
+            _write(root / "b.yml", "")
+            other = collect_other_files(root, {".yml"})
+            self.assertEqual(other, [])

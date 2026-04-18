@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -193,6 +194,20 @@ def collect_source_files(source_path, allowed_extensions):
     return sorted(files)
 
 
+def collect_other_files(source_path, allowed_extensions):
+    """Recursively collect all files whose extension is NOT in allowed_extensions.
+
+    Returns a sorted list of absolute Path objects.
+    """
+    files = []
+    for root, _dirs, filenames in os.walk(str(source_path)):
+        for filename in filenames:
+            fp = Path(root) / filename
+            if fp.suffix.lower() not in allowed_extensions:
+                files.append(fp)
+    return sorted(files)
+
+
 # ---------------------------------------------------------------------------
 # File I/O helpers
 # ---------------------------------------------------------------------------
@@ -215,6 +230,17 @@ def dest_needs_update(transformed, dest_path):
     return transformed != existing
 
 
+def dest_needs_update_bytes(src_path, dest_path):
+    """Return True if the destination file is missing or differs from the source (binary compare)."""
+    if not dest_path.exists():
+        return True
+    try:
+        with open(str(src_path), "rb") as s, open(str(dest_path), "rb") as d:
+            return s.read() != d.read()
+    except OSError:
+        return True
+
+
 # ---------------------------------------------------------------------------
 # High-level sync runner
 # ---------------------------------------------------------------------------
@@ -223,12 +249,16 @@ def dest_needs_update(transformed, dest_path):
 def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
     """Perform the sync from source_path to dest_path.
 
-    Applies find/replace rules and only writes files whose content has changed.
+    Applies find/replace rules to eligible text files and only writes files
+    whose content has changed.  If 'copy_other_files' is True in the syncmap,
+    files whose extension is not in the allowed list are copied as-is (binary
+    copy, no replacements applied).
     Returns a list of relative path strings that were written/changed.
     Set dry_run=True to skip writing (used in tests).
     """
     replacements = syncmap.get("replacements", [])
     allowed_extensions = get_allowed_extensions(syncmap)
+    copy_other = syncmap.get("copy_other_files", False)
     source_files = collect_source_files(source_path, allowed_extensions)
     changed_files = []
 
@@ -261,5 +291,24 @@ def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
                 continue
 
         changed_files.append(str(rel))
+
+    if copy_other:
+        other_files = collect_other_files(source_path, allowed_extensions)
+        for src_file in other_files:
+            rel = src_file.relative_to(source_path)
+            dest_file = dest_path / rel
+
+            if not dest_needs_update_bytes(src_file, dest_file):
+                continue
+
+            if not dry_run:
+                try:
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src_file), str(dest_file))
+                except OSError as exc:
+                    sys.stderr.write(f"ERROR: Could not copy '{dest_file}': {exc}\n")
+                    continue
+
+            changed_files.append(str(rel))
 
     return changed_files
