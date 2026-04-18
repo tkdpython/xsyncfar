@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=42"]
+requires = ["setuptools>=42", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "xsyncfar"
-version = "0.1.0"
+dynamic = ["version"]
 description = "xsyncfar"
 readme = "README.md"
 requires-python = ">=3.6"
@@ -24,6 +24,12 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Operating System :: OS Independent",
 ]
+
+[tool.setuptools_scm]
+# Derives version from git tags (e.g. v0.2.0 → 0.2.0).
+# Commits after a tag produce a dev suffix: 0.2.0.dev3+gabcdef
+version_scheme = "post-release"
+local_scheme = "no-local-version"
 
 [project.scripts]
 xsyncfar = "xsyncfar.cli:main"
