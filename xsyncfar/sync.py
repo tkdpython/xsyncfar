@@ -169,6 +169,54 @@ def apply_replacements(content, replacements, direction):
 
 
 # ---------------------------------------------------------------------------
+# Filename renaming
+# ---------------------------------------------------------------------------
+
+# Characters that are never legal in a filename on any supported platform.
+_INVALID_FILENAME_CHARS = set('/\\:*?"<>|\x00')
+
+
+def _is_valid_filename(name):
+    """Return True if name is a legal filename on the current platform.
+
+    Checks for:
+    - Empty string
+    - Characters illegal on Windows or POSIX (/, \\, :, *, ?, ", <, >, |, NUL)
+    - Windows-reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    - Names that are only dots (. or ..)
+    """
+    if not name:
+        return False
+    if any(ch in _INVALID_FILENAME_CHARS for ch in name):
+        return False
+    stem = name.rsplit(".", 1)[0].upper()
+    reserved = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+    if stem in reserved:
+        return False
+    if all(ch == "." for ch in name):
+        return False
+    return True
+
+
+def apply_replacements_to_filename(filename, replacements, direction):
+    """Apply find/replace rules to the stem of a filename, preserving the extension.
+
+    Returns the new filename if the result is valid and different from the
+    original, or None if no replacement matched or if any replacement would
+    produce an invalid filename (in which case the file should not be renamed).
+    """
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    new_stem = apply_replacements(stem, replacements, direction)
+    if new_stem == stem:
+        return None
+    new_filename = new_stem + suffix
+    if not _is_valid_filename(new_filename):
+        return None
+    return new_filename
+
+
+# ---------------------------------------------------------------------------
 # File selection
 # ---------------------------------------------------------------------------
 
@@ -291,13 +339,16 @@ def dest_needs_update_bytes(src_path, dest_path):
 # ---------------------------------------------------------------------------
 
 
-def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
+def run_sync(source_path, dest_path, direction, syncmap, dry_run=False, rename_files=False):
     """Perform the sync from source_path to dest_path.
 
     Applies find/replace rules to eligible text files and only writes files
     whose content has changed.  If 'copy_other_files' is True in the syncmap,
     files whose extension is not in the allowed list are copied as-is (binary
     copy, no replacements applied).
+    If rename_files is True, the replacement rules are also applied to each
+    filename stem.  Any replacement that would produce an invalid filename is
+    silently skipped and the original filename is kept.
     Returns a list of relative path strings that were written/changed.
     Set dry_run=True to skip writing (used in tests).
     """
@@ -310,7 +361,16 @@ def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
 
     for src_file in source_files:
         rel = src_file.relative_to(source_path)
-        dest_file = dest_path / rel
+
+        if rename_files:
+            new_filename = apply_replacements_to_filename(src_file.name, replacements, direction)
+        else:
+            new_filename = None
+
+        if new_filename is not None:
+            dest_file = dest_path / rel.parent / new_filename
+        else:
+            dest_file = dest_path / rel
 
         try:
             content = read_file_text(src_file)
@@ -336,7 +396,8 @@ def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
                 sys.stderr.write(f"ERROR: Could not write '{dest_file}': {exc}\n")
                 continue
 
-        changed_files.append(str(rel))
+        dest_rel = rel.parent / new_filename if new_filename is not None else rel
+        changed_files.append(str(dest_rel))
 
     if copy_other:
         other_files = collect_other_files(source_path, allowed_extensions, ignore_patterns)

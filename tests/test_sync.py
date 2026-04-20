@@ -6,7 +6,9 @@ import unittest
 from pathlib import Path
 
 from xsyncfar.sync import (
+    _is_valid_filename,
     apply_replacements,
+    apply_replacements_to_filename,
     build_absolute_path,
     collect_other_files,
     collect_source_files,
@@ -593,6 +595,157 @@ class TestIgnorePatterns(unittest.TestCase):
             run_sync(lab, prod, "lab_to_prod", syncmap)
             self.assertTrue((prod / "values.yml").exists())
             self.assertFalse((prod / ".git" / "config").exists())
+
+
+# ---------------------------------------------------------------------------
+# _is_valid_filename
+# ---------------------------------------------------------------------------
+
+
+class TestIsValidFilename(unittest.TestCase):
+    def test_valid_names(self):
+        for name in ["values.yml", "myapp-config.json", "README.md", "file"]:
+            self.assertTrue(_is_valid_filename(name), f"Expected valid: {name!r}")
+
+    def test_empty_string(self):
+        self.assertFalse(_is_valid_filename(""))
+
+    def test_invalid_chars(self):
+        for name in [
+            "foo/bar.yml",
+            "foo\\bar.yml",
+            "foo:bar.yml",
+            "foo*bar.yml",
+            "foo?bar.yml",
+            'foo"bar.yml',
+            "foo<bar.yml",
+            "foo>bar.yml",
+            "foo|bar.yml",
+            "foo\x00bar.yml",
+        ]:
+            self.assertFalse(_is_valid_filename(name), f"Expected invalid: {name!r}")
+
+    def test_windows_reserved_names(self):
+        for name in ["CON", "con", "CON.txt", "PRN.yml", "NUL", "COM1", "LPT9"]:
+            self.assertFalse(_is_valid_filename(name), f"Expected invalid: {name!r}")
+
+    def test_only_dots(self):
+        self.assertFalse(_is_valid_filename("."))
+        self.assertFalse(_is_valid_filename(".."))
+
+    def test_dotfile_is_valid(self):
+        self.assertTrue(_is_valid_filename(".gitignore"))
+
+
+# ---------------------------------------------------------------------------
+# apply_replacements_to_filename
+# ---------------------------------------------------------------------------
+
+
+class TestApplyReplacementsToFilename(unittest.TestCase):
+    REPLACEMENTS = [
+        {"lab": "myapp", "prod": "targetapp"},
+        {"lab": "myorg", "prod": "targetorg"},
+    ]
+
+    def test_renames_stem_lab_to_prod(self):
+        result = apply_replacements_to_filename("myapp-values.yml", self.REPLACEMENTS, "lab_to_prod")
+        self.assertEqual(result, "targetapp-values.yml")
+
+    def test_renames_stem_prod_to_lab(self):
+        result = apply_replacements_to_filename("targetapp-values.yml", self.REPLACEMENTS, "prod_to_lab")
+        self.assertEqual(result, "myapp-values.yml")
+
+    def test_no_match_returns_none(self):
+        result = apply_replacements_to_filename("unrelated.yml", self.REPLACEMENTS, "lab_to_prod")
+        self.assertIsNone(result)
+
+    def test_extension_preserved(self):
+        result = apply_replacements_to_filename("myapp.json", self.REPLACEMENTS, "lab_to_prod")
+        self.assertEqual(result, "targetapp.json")
+
+    def test_no_extension_file(self):
+        result = apply_replacements_to_filename("myapp", self.REPLACEMENTS, "lab_to_prod")
+        self.assertEqual(result, "targetapp")
+
+    def test_invalid_result_returns_none(self):
+        # Replacement introduces a / making the filename invalid
+        replacements = [{"lab": "myapp", "prod": "target/app"}]
+        result = apply_replacements_to_filename("myapp.yml", replacements, "lab_to_prod")
+        self.assertIsNone(result)
+
+    def test_case_mirroring_uppercase(self):
+        result = apply_replacements_to_filename("MYAPP.yml", self.REPLACEMENTS, "lab_to_prod")
+        self.assertEqual(result, "TARGETAPP.yml")
+
+    def test_case_mirroring_titlecase(self):
+        result = apply_replacements_to_filename("Myapp.yml", self.REPLACEMENTS, "lab_to_prod")
+        self.assertEqual(result, "Targetapp.yml")
+
+
+# ---------------------------------------------------------------------------
+# run_sync with rename_files=True
+# ---------------------------------------------------------------------------
+
+
+class TestRunSyncFileRenaming(unittest.TestCase):
+    SYNCMAP = {
+        "prefix": "",
+        "replacements": [{"lab": "myapp", "prod": "targetapp"}],
+        "mappings": [],
+    }
+
+    def test_file_renamed_in_dest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-values.yml", "name: myapp\n")
+            changed = run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=True)
+            self.assertTrue((prod / "targetapp-values.yml").exists())
+            self.assertFalse((prod / "myapp-values.yml").exists())
+            self.assertIn("targetapp-values.yml", changed)
+
+    def test_content_also_replaced_in_renamed_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-values.yml", "name: myapp\n")
+            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=True)
+            content = _read(prod / "targetapp-values.yml")
+            self.assertIn("targetapp", content)
+            self.assertNotIn("myapp", content)
+
+    def test_no_rename_without_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-values.yml", "name: myapp\n")
+            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=False)
+            self.assertTrue((prod / "myapp-values.yml").exists())
+            self.assertFalse((prod / "targetapp-values.yml").exists())
+
+    def test_invalid_rename_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-values.yml", "name: myapp\n")
+            syncmap = {
+                "prefix": "",
+                "replacements": [{"lab": "myapp", "prod": "target/app"}],
+                "mappings": [],
+            }
+            run_sync(lab, prod, "lab_to_prod", syncmap, rename_files=True)
+            # Original filename kept because replacement is invalid
+            self.assertTrue((prod / "myapp-values.yml").exists())
+            self.assertFalse((prod / "target" / "app-values.yml").exists())
+
+    def test_subdir_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "config" / "myapp-values.yml", "name: myapp\n")
+            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=True)
+            self.assertTrue((prod / "config" / "targetapp-values.yml").exists())
 
 
 if __name__ == "__main__":
