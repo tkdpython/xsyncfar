@@ -7,6 +7,7 @@ from .sync import (
     detect_direction,
     find_config,
     get_allowed_extensions,
+    get_match_globs,
     load_config,
     run_sync,
 )
@@ -84,7 +85,8 @@ def main():
     rename_files = args.include_file_renaming
 
     allowed_extensions = get_allowed_extensions(syncmap)
-    source_files = collect_source_files(source_path, allowed_extensions)
+    match_globs = get_match_globs(syncmap)
+    source_files = collect_source_files(source_path, allowed_extensions, match_globs=match_globs)
 
     _print_preflight(source_path, dest_path, direction, replacements, len(source_files), rename_files=rename_files)
 

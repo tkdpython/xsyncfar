@@ -17,6 +17,7 @@ from xsyncfar.sync import (
     find_config,
     get_allowed_extensions,
     get_ignore_patterns,
+    get_match_globs,
     load_config,
     run_sync,
 )
@@ -287,8 +288,70 @@ class TestGetAllowedExtensions(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# collect_source_files
+# get_match_globs
 # ---------------------------------------------------------------------------
+
+
+class TestGetMatchGlobs(unittest.TestCase):
+    def test_returns_empty_list_when_not_configured(self):
+        syncmap = {"prefix": "", "mappings": []}
+        self.assertEqual(get_match_globs(syncmap), [])
+
+    def test_returns_configured_globs(self):
+        syncmap = {"match_file_globs": ["Dockerfile", "Makefile", ".env*"]}
+        self.assertEqual(get_match_globs(syncmap), ["Dockerfile", "Makefile", ".env*"])
+
+
+# ---------------------------------------------------------------------------
+# collect_source_files — match_globs
+# ---------------------------------------------------------------------------
+
+
+class TestCollectSourceFilesMatchGlobs(unittest.TestCase):
+    def test_includes_extensionless_file_matching_glob(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            _write(base / "Dockerfile", "FROM python:3.11")
+            _write(base / "app.py", "x = 1")
+            _write(base / "README.md", "hello")
+            files = collect_source_files(base, {".py"}, match_globs=["Dockerfile"])
+            names = [f.name for f in files]
+            self.assertIn("Dockerfile", names)
+            self.assertIn("app.py", names)
+            self.assertNotIn("README.md", names)
+
+    def test_glob_pattern_matches_wildcard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            _write(base / ".env", "VAR=value")
+            _write(base / ".env.prod", "VAR=prod")
+            _write(base / "skip.bin", "binary")
+            files = collect_source_files(base, set(), match_globs=[".env*"])
+            names = [f.name for f in files]
+            self.assertIn(".env", names)
+            self.assertIn(".env.prod", names)
+            self.assertNotIn("skip.bin", names)
+
+    def test_glob_does_not_override_ignore(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            _write(base / "Dockerfile", "FROM python:3.11")
+            files = collect_source_files(base, set(), ignore_patterns=["Dockerfile"], match_globs=["Dockerfile"])
+            names = [f.name for f in files]
+            self.assertNotIn("Dockerfile", names)
+
+
+class TestCollectOtherFilesMatchGlobs(unittest.TestCase):
+    def test_excludes_glob_matched_files_from_other(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            _write(base / "Dockerfile", "FROM python:3.11")
+            _write(base / "image.png", "binarydata")
+            files = collect_other_files(base, {".py"}, match_globs=["Dockerfile"])
+            names = [f.name for f in files]
+            # Dockerfile is handled by collect_source_files, not here
+            self.assertNotIn("Dockerfile", names)
+            self.assertIn("image.png", names)
 
 
 class TestCollectSourceFiles(unittest.TestCase):

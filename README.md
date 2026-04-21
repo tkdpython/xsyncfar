@@ -15,6 +15,7 @@ The sync direction is determined automatically by the directory you run the tool
 - Pre-flight summary with confirmation prompt before any changes are made
 - Automatically creates missing destination directories and files
 - Configurable file extension filter (with sensible defaults)
+- Filename glob matching for extensionless files (e.g. `Dockerfile`, `Makefile`, `.env`)
 - Git-style config discovery (walks up the directory tree)
 - Works on Windows and Linux/macOS
 - Python 3.6+, no dependencies beyond PyYAML
@@ -52,6 +53,14 @@ syncmap:
   #   - .yml
   #   - .tf
   #   - .py
+
+  # Optional: include files by filename glob pattern, regardless of extension.
+  # Use this for extensionless files like Dockerfile, Makefile, .env, etc.
+  # These files are treated as text files (replacements applied).
+  # match_file_globs:
+  #   - "Dockerfile"
+  #   - "Makefile"
+  #   - ".env*"
 
   # Optional: copy files with non-matching extensions as-is (binary copy, no replacements)
   # Useful for images, binaries, shell scripts, etc.
@@ -140,6 +149,20 @@ Sync complete — 3 file(s) written:
 `.py`, `.yml`, `.yaml`, `.json`, `.txt`, `.md`
 
 Override by adding an `extensions` list to your `.xsyncfar.yml`.
+
+### Matching extensionless files
+
+Some important files (e.g. `Dockerfile`, `Makefile`, `.env`) have no extension. Use `match_file_globs` to include them as text files (replacements will be applied):
+
+```yaml
+syncmap:
+  match_file_globs:
+    - "Dockerfile"
+    - "Makefile"
+    - ".env*"
+```
+
+Glob patterns are matched against the **filename only** (not the full path). Ignored files are still excluded even if they match a glob.
 
 To also copy files with **other** extensions unchanged (binary copy, no replacements — useful for images, scripts, binaries), set `copy_other_files: true` in your syncmap.
 
