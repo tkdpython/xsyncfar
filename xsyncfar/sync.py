@@ -121,6 +121,29 @@ def detect_direction(syncmap, cwd=None):
     )
 
 
+def resolve_all_mappings(syncmap, source_label):
+    """Return a list of (source_path, dest_path, direction) tuples for every
+    mapping in the config, treating *source_label* ('lab' or 'prod') as the
+    source side.
+
+    Raises ValueError for an unrecognised source_label.
+    """
+    if source_label not in ("lab", "prod"):
+        raise ValueError(f"source_label must be 'lab' or 'prod', got '{source_label}'")
+    prefix = syncmap.get("prefix", "")
+    mappings = syncmap.get("mappings", [])
+    direction = "lab_to_prod" if source_label == "lab" else "prod_to_lab"
+    result = []
+    for mapping in mappings:
+        lab_abs = build_absolute_path(prefix, mapping["lab"])
+        prod_abs = build_absolute_path(prefix, mapping["prod"])
+        if source_label == "lab":
+            result.append((lab_abs, prod_abs, direction))
+        else:
+            result.append((prod_abs, lab_abs, direction))
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Replacement application
 # ---------------------------------------------------------------------------

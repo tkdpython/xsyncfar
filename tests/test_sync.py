@@ -21,6 +21,7 @@ from xsyncfar.sync import (
     get_ignore_patterns,
     get_match_globs,
     load_config,
+    resolve_all_mappings,
     run_sync,
 )
 
@@ -183,6 +184,53 @@ class TestDetectDirection(unittest.TestCase):
             syncmap = self._make_syncmap(lab, prod)
             with self.assertRaises(SystemExit):
                 detect_direction(syncmap, cwd=str(other))
+
+
+# ---------------------------------------------------------------------------
+# resolve_all_mappings
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAllMappings(unittest.TestCase):
+    def _make_syncmap(self, pairs):
+        return {
+            "prefix": "",
+            "replacements": [],
+            "mappings": [{"lab": str(lab), "prod": str(prod)} for lab, prod in pairs],
+        }
+
+    def test_lab_source_returns_lab_to_prod(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab1 = Path(tmp) / "lab1"
+            prod1 = Path(tmp) / "prod1"
+            lab2 = Path(tmp) / "lab2"
+            prod2 = Path(tmp) / "prod2"
+            syncmap = self._make_syncmap([(lab1, prod1), (lab2, prod2)])
+            results = resolve_all_mappings(syncmap, "lab")
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0], (lab1.resolve(), prod1.resolve(), "lab_to_prod"))
+            self.assertEqual(results[1], (lab2.resolve(), prod2.resolve(), "lab_to_prod"))
+
+    def test_prod_source_returns_prod_to_lab(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab1 = Path(tmp) / "lab1"
+            prod1 = Path(tmp) / "prod1"
+            syncmap = self._make_syncmap([(lab1, prod1)])
+            results = resolve_all_mappings(syncmap, "prod")
+            self.assertEqual(len(results), 1)
+            src, dst, direction = results[0]
+            self.assertEqual(src, prod1.resolve())
+            self.assertEqual(dst, lab1.resolve())
+            self.assertEqual(direction, "prod_to_lab")
+
+    def test_empty_mappings_returns_empty_list(self):
+        syncmap = {"prefix": "", "replacements": [], "mappings": []}
+        self.assertEqual(resolve_all_mappings(syncmap, "lab"), [])
+
+    def test_invalid_label_raises_value_error(self):
+        syncmap = {"prefix": "", "replacements": [], "mappings": []}
+        with self.assertRaises(ValueError):
+            resolve_all_mappings(syncmap, "invalid")
 
 
 # ---------------------------------------------------------------------------
