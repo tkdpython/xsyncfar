@@ -2,7 +2,6 @@ import argparse
 import sys
 
 from .sync import (
-    apply_replacements_to_filename,
     collect_source_files,
     detect_direction,
     find_config,
@@ -18,7 +17,9 @@ def _format_direction(direction):
     return "lab → prod" if direction == "lab_to_prod" else "prod → lab"
 
 
-def _print_preflight(source_path, dest_path, direction, replacements, file_count, rename_files=False):
+def _print_preflight(
+    source_path, dest_path, direction, replacements, file_count, rename_files=False, rename_dirs=False
+):
     """Print the pre-flight summary to stdout."""
     print("\n" + "=" * 60)
     print("  xsyncfar — pre-flight summary")
@@ -28,6 +29,7 @@ def _print_preflight(source_path, dest_path, direction, replacements, file_count
     print(f"  Dest          : {dest_path}")
     print(f"  Files         : {file_count} eligible file(s) found")
     print(f"  File renaming : {'enabled' if rename_files else 'disabled'}")
+    print(f"  Dir renaming  : {'enabled' if rename_dirs else 'disabled'}")
     print()
     if replacements:
         print("  Replacements to apply:")
@@ -36,10 +38,15 @@ def _print_preflight(source_path, dest_path, direction, replacements, file_count
                 print(f"    '{entry['lab']}'  →  '{entry['prod']}'")
             else:
                 print(f"    '{entry['prod']}'  →  '{entry['lab']}'")
-        if rename_files:
+        if rename_files or rename_dirs:
             print()
-            print("  Note: above rules will also be applied to filenames (stem only).")
-            print("        Any result that would be an invalid filename is skipped silently.")
+            applied_to = []
+            if rename_files:
+                applied_to.append("filenames (stem only)")
+            if rename_dirs:
+                applied_to.append("directory names")
+            print(f"  Note: above rules will also be applied to {' and '.join(applied_to)}.")
+            print("        Any result that would be invalid is skipped silently.")
     else:
         print("  Replacements : none")
     print("=" * 60 + "\n")
@@ -55,15 +62,6 @@ def main():
         "--version",
         action="version",
         version="%(prog)s 0.1.0",
-    )
-    parser.add_argument(
-        "--include-file-renaming",
-        action="store_true",
-        default=False,
-        help=(
-            "Also apply replacement rules to filenames (stem only, extension preserved). "
-            "Any replacement that would produce an invalid filename is skipped silently."
-        ),
     )
     args = parser.parse_args()
 
@@ -82,13 +80,22 @@ def main():
         raise
 
     replacements = syncmap.get("replacements", [])
-    rename_files = args.include_file_renaming
+    rename_files = syncmap.get("rename_files", False)
+    rename_dirs = syncmap.get("rename_dirs", False)
 
     allowed_extensions = get_allowed_extensions(syncmap)
     match_globs = get_match_globs(syncmap)
     source_files = collect_source_files(source_path, allowed_extensions, match_globs=match_globs)
 
-    _print_preflight(source_path, dest_path, direction, replacements, len(source_files), rename_files=rename_files)
+    _print_preflight(
+        source_path,
+        dest_path,
+        direction,
+        replacements,
+        len(source_files),
+        rename_files=rename_files,
+        rename_dirs=rename_dirs,
+    )
 
     if not source_files:
         print("Nothing to sync — no eligible files found in source directory.")
@@ -105,7 +112,7 @@ def main():
         sys.exit(0)
 
     print()
-    changed = run_sync(source_path, dest_path, direction, syncmap, rename_files=rename_files)
+    changed = run_sync(source_path, dest_path, direction, syncmap)
 
     print()
     if changed:

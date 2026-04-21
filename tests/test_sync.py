@@ -8,7 +8,9 @@ from pathlib import Path
 from xsyncfar.sync import (
     _is_valid_filename,
     apply_replacements,
+    apply_replacements_to_dirname,
     apply_replacements_to_filename,
+    apply_replacements_to_path,
     build_absolute_path,
     collect_other_files,
     collect_source_files,
@@ -747,7 +749,7 @@ class TestApplyReplacementsToFilename(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# run_sync with rename_files=True
+# run_sync with rename_files / rename_dirs in syncmap
 # ---------------------------------------------------------------------------
 
 
@@ -756,6 +758,7 @@ class TestRunSyncFileRenaming(unittest.TestCase):
         "prefix": "",
         "replacements": [{"lab": "myapp", "prod": "targetapp"}],
         "mappings": [],
+        "rename_files": True,
     }
 
     def test_file_renamed_in_dest(self):
@@ -763,7 +766,7 @@ class TestRunSyncFileRenaming(unittest.TestCase):
             lab = Path(tmp) / "lab"
             prod = Path(tmp) / "prod"
             _write(lab / "myapp-values.yml", "name: myapp\n")
-            changed = run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=True)
+            changed = run_sync(lab, prod, "lab_to_prod", self.SYNCMAP)
             self.assertTrue((prod / "targetapp-values.yml").exists())
             self.assertFalse((prod / "myapp-values.yml").exists())
             self.assertIn("targetapp-values.yml", changed)
@@ -773,7 +776,7 @@ class TestRunSyncFileRenaming(unittest.TestCase):
             lab = Path(tmp) / "lab"
             prod = Path(tmp) / "prod"
             _write(lab / "myapp-values.yml", "name: myapp\n")
-            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=True)
+            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP)
             content = _read(prod / "targetapp-values.yml")
             self.assertIn("targetapp", content)
             self.assertNotIn("myapp", content)
@@ -783,7 +786,22 @@ class TestRunSyncFileRenaming(unittest.TestCase):
             lab = Path(tmp) / "lab"
             prod = Path(tmp) / "prod"
             _write(lab / "myapp-values.yml", "name: myapp\n")
-            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=False)
+            syncmap = {**self.SYNCMAP, "rename_files": False}
+            run_sync(lab, prod, "lab_to_prod", syncmap)
+            self.assertTrue((prod / "myapp-values.yml").exists())
+            self.assertFalse((prod / "targetapp-values.yml").exists())
+
+    def test_no_rename_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-values.yml", "name: myapp\n")
+            syncmap = {
+                "prefix": "",
+                "replacements": [{"lab": "myapp", "prod": "targetapp"}],
+                "mappings": [],
+            }
+            run_sync(lab, prod, "lab_to_prod", syncmap)
             self.assertTrue((prod / "myapp-values.yml").exists())
             self.assertFalse((prod / "targetapp-values.yml").exists())
 
@@ -796,8 +814,9 @@ class TestRunSyncFileRenaming(unittest.TestCase):
                 "prefix": "",
                 "replacements": [{"lab": "myapp", "prod": "target/app"}],
                 "mappings": [],
+                "rename_files": True,
             }
-            run_sync(lab, prod, "lab_to_prod", syncmap, rename_files=True)
+            run_sync(lab, prod, "lab_to_prod", syncmap)
             # Original filename kept because replacement is invalid
             self.assertTrue((prod / "myapp-values.yml").exists())
             self.assertFalse((prod / "target" / "app-values.yml").exists())
@@ -807,8 +826,77 @@ class TestRunSyncFileRenaming(unittest.TestCase):
             lab = Path(tmp) / "lab"
             prod = Path(tmp) / "prod"
             _write(lab / "config" / "myapp-values.yml", "name: myapp\n")
-            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP, rename_files=True)
+            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP)
             self.assertTrue((prod / "config" / "targetapp-values.yml").exists())
+
+
+# ---------------------------------------------------------------------------
+# run_sync with rename_dirs in syncmap
+# ---------------------------------------------------------------------------
+
+
+class TestRunSyncDirRenaming(unittest.TestCase):
+    SYNCMAP = {
+        "prefix": "",
+        "replacements": [{"lab": "myapp", "prod": "targetapp"}],
+        "mappings": [],
+        "rename_dirs": True,
+    }
+
+    def test_directory_renamed_in_dest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-config" / "values.yml", "name: myapp\n")
+            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP)
+            self.assertTrue((prod / "targetapp-config" / "values.yml").exists())
+            self.assertFalse((prod / "myapp-config").exists())
+
+    def test_no_dir_rename_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-config" / "values.yml", "name: myapp\n")
+            syncmap = {
+                "prefix": "",
+                "replacements": [{"lab": "myapp", "prod": "targetapp"}],
+                "mappings": [],
+            }
+            run_sync(lab, prod, "lab_to_prod", syncmap)
+            self.assertTrue((prod / "myapp-config" / "values.yml").exists())
+            self.assertFalse((prod / "targetapp-config").exists())
+
+    def test_file_and_dir_rename_together(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-config" / "myapp-values.yml", "name: myapp\n")
+            syncmap = {**self.SYNCMAP, "rename_files": True}
+            run_sync(lab, prod, "lab_to_prod", syncmap)
+            self.assertTrue((prod / "targetapp-config" / "targetapp-values.yml").exists())
+
+    def test_invalid_dir_rename_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-config" / "values.yml", "name: myapp\n")
+            syncmap = {
+                "prefix": "",
+                "replacements": [{"lab": "myapp", "prod": "target/app"}],
+                "mappings": [],
+                "rename_dirs": True,
+            }
+            run_sync(lab, prod, "lab_to_prod", syncmap)
+            # Original dir name kept because replacement is invalid
+            self.assertTrue((prod / "myapp-config" / "values.yml").exists())
+
+    def test_nested_dir_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lab = Path(tmp) / "lab"
+            prod = Path(tmp) / "prod"
+            _write(lab / "myapp-config" / "myapp-subdir" / "values.yml", "name: myapp\n")
+            run_sync(lab, prod, "lab_to_prod", self.SYNCMAP)
+            self.assertTrue((prod / "targetapp-config" / "targetapp-subdir" / "values.yml").exists())
 
 
 if __name__ == "__main__":

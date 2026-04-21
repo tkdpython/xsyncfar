@@ -216,6 +216,42 @@ def apply_replacements_to_filename(filename, replacements, direction):
     return new_filename
 
 
+def apply_replacements_to_dirname(dirname, replacements, direction):
+    """Apply find/replace rules to a single directory name component.
+
+    Returns the new directory name if the result is valid and different from
+    the original, or None if no replacement matched or the result would be
+    an invalid directory name.
+    """
+    new_name = apply_replacements(dirname, replacements, direction)
+    if new_name == dirname:
+        return None
+    if not _is_valid_filename(new_name):  # same validity rules apply to dir names
+        return None
+    return new_name
+
+
+def apply_replacements_to_path(rel_path, replacements, direction):
+    """Apply find/replace rules to every component of a relative path.
+
+    Both directory parts and the filename stem are transformed.  Any component
+    whose replacement would be invalid is left unchanged.
+    Returns a new Path object (may be equal to the input if nothing changed).
+    """
+    parts = list(rel_path.parts)
+    if not parts:
+        return rel_path
+    # Transform all directory components (everything except the last part)
+    new_parts = []
+    for part in parts[:-1]:
+        renamed = apply_replacements_to_dirname(part, replacements, direction)
+        new_parts.append(renamed if renamed is not None else part)
+    # Transform the filename
+    renamed_file = apply_replacements_to_filename(parts[-1], replacements, direction)
+    new_parts.append(renamed_file if renamed_file is not None else parts[-1])
+    return Path(*new_parts)
+
+
 # ---------------------------------------------------------------------------
 # File selection
 # ---------------------------------------------------------------------------
@@ -371,16 +407,20 @@ def dest_needs_update_bytes(src_path, dest_path):
 # ---------------------------------------------------------------------------
 
 
-def run_sync(source_path, dest_path, direction, syncmap, dry_run=False, rename_files=False):
+def run_sync(source_path, dest_path, direction, syncmap, dry_run=False):
     """Perform the sync from source_path to dest_path.
 
     Applies find/replace rules to eligible text files and only writes files
     whose content has changed.  If 'copy_other_files' is True in the syncmap,
     files whose extension is not in the allowed list are copied as-is (binary
     copy, no replacements applied).
-    If rename_files is True, the replacement rules are also applied to each
-    filename stem.  Any replacement that would produce an invalid filename is
-    silently skipped and the original filename is kept.
+    If 'rename_files' is True in the syncmap, the replacement rules are also
+    applied to each filename stem.  Any replacement that would produce an
+    invalid filename is silently skipped and the original filename is kept.
+    If 'rename_dirs' is True in the syncmap, the replacement rules are also
+    applied to each directory component of the relative path.  Any component
+    whose replacement would be invalid is left unchanged.
+    Both options default to False.
     Returns a list of relative path strings that were written/changed.
     Set dry_run=True to skip writing (used in tests).
     """
@@ -389,21 +429,29 @@ def run_sync(source_path, dest_path, direction, syncmap, dry_run=False, rename_f
     ignore_patterns = get_ignore_patterns(syncmap)
     match_globs = get_match_globs(syncmap)
     copy_other = syncmap.get("copy_other_files", False)
+    rename_files = syncmap.get("rename_files", False)
+    rename_dirs = syncmap.get("rename_dirs", False)
     source_files = collect_source_files(source_path, allowed_extensions, ignore_patterns, match_globs)
     changed_files = []
 
     for src_file in source_files:
         rel = src_file.relative_to(source_path)
 
-        if rename_files:
+        if rename_dirs and rename_files:
+            dest_rel = apply_replacements_to_path(rel, replacements, direction)
+        elif rename_dirs:
+            # Rename directory parts only; leave the filename unchanged
+            dir_parts = list(rel.parent.parts)
+            new_dir_parts = [(apply_replacements_to_dirname(p, replacements, direction) or p) for p in dir_parts]
+            new_parent = Path(*new_dir_parts) if new_dir_parts else Path("")
+            dest_rel = new_parent / rel.name
+        elif rename_files:
             new_filename = apply_replacements_to_filename(src_file.name, replacements, direction)
+            dest_rel = rel.parent / (new_filename if new_filename is not None else rel.name)
         else:
-            new_filename = None
+            dest_rel = rel
 
-        if new_filename is not None:
-            dest_file = dest_path / rel.parent / new_filename
-        else:
-            dest_file = dest_path / rel
+        dest_file = dest_path / dest_rel
 
         try:
             content = read_file_text(src_file)
@@ -429,7 +477,6 @@ def run_sync(source_path, dest_path, direction, syncmap, dry_run=False, rename_f
                 sys.stderr.write(f"ERROR: Could not write '{dest_file}': {exc}\n")
                 continue
 
-        dest_rel = rel.parent / new_filename if new_filename is not None else rel
         changed_files.append(str(dest_rel))
 
     if copy_other:
